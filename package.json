@@ -45,7 +45,7 @@
     "access": "public"
   },
   "dependencies": {
-    "@theotherwillembotha/node-red-plugincore": "^0.0.53",
+    "@theotherwillembotha/node-red-plugincore": "^0.0.54",
     "temporal-polyfill": "^0.3.2"
   },
   "devDependencies": {
