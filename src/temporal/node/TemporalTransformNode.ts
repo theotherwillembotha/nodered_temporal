@@ -2,7 +2,7 @@ import { Temporal } from 'temporal-polyfill';
 import { Node } from "node-red";
 import { BaseNode, BaseNodeConfig, NodeDescription, onInput } from "@theotherwillembotha/node-red-plugincore";
 import { SourceUtility } from "@theotherwillembotha/node-red-plugincore";
-import { TemporalService } from "../service/TemporalService";
+import { NAMED_FORMATS, TemporalService } from "../service/TemporalService";
 
 export interface TemporalTransformNodeConfig extends BaseNodeConfig {
     // Input
@@ -25,26 +25,37 @@ export interface TemporalTransformNodeConfig extends BaseNodeConfig {
     outputToType: string;
 }
 
-// Custom format tokens — ordered longest-first to prevent partial matches (e.g. MM before M)
-type CustomField = 'year' | 'yearShort' | 'month' | 'day' | 'hour' | 'hour12' | 'minute' | 'second' | 'millisecond' | 'ampm';
-const CUSTOM_TOKENS: { token: string; field: CustomField; pattern: string; pad: number }[] = [
-    { token: 'YYYY', field: 'year',        pattern: '\\d{4}',    pad: 4 },
-    { token: 'YY',   field: 'yearShort',   pattern: '\\d{2}',    pad: 2 },
-    { token: 'MM',   field: 'month',       pattern: '\\d{1,2}',  pad: 2 },
-    { token: 'DD',   field: 'day',         pattern: '\\d{1,2}',  pad: 2 },
-    { token: 'HH',   field: 'hour',        pattern: '\\d{1,2}',  pad: 2 },
-    { token: 'hh',   field: 'hour12',      pattern: '\\d{1,2}',  pad: 2 },
-    { token: 'mm',   field: 'minute',      pattern: '\\d{1,2}',  pad: 2 },
-    { token: 'ss',   field: 'second',      pattern: '\\d{1,2}',  pad: 2 },
-    { token: 'SSS',  field: 'millisecond', pattern: '\\d{1,3}',  pad: 3 },
-    { token: 'M',    field: 'month',       pattern: '\\d{1,2}',  pad: 0 },
-    { token: 'D',    field: 'day',         pattern: '\\d{1,2}',  pad: 0 },
-    { token: 'H',    field: 'hour',        pattern: '\\d{1,2}',  pad: 0 },
-    { token: 'h',    field: 'hour12',      pattern: '\\d{1,2}',  pad: 0 },
-    { token: 'm',    field: 'minute',      pattern: '\\d{1,2}',  pad: 0 },
-    { token: 's',    field: 'second',      pattern: '\\d{1,2}',  pad: 0 },
-    { token: 'A',    field: 'ampm',        pattern: 'AM|PM',     pad: 0 },
-    { token: 'a',    field: 'ampm',        pattern: 'am|pm',     pad: 0 },
+// Custom format tokens (ordered longest-first to prevent partial matches e.g. MM before M)
+type CustomParseState = {
+    year: number; month: number; day: number;
+    hour: number; hour12: number | null;
+    minute: number; second: number; millisecond: number;
+    ampm: string;
+};
+type CustomToken = {
+    token:   string;
+    pattern: string;
+    parse:   (val: string, state: CustomParseState) => void;
+    format:  (zdt: Temporal.ZonedDateTime) => string;
+};
+const CUSTOM_TOKENS: CustomToken[] = [
+    { token: 'YYYY', pattern: '\\d{4}',   parse: (v, s) => { s.year        = parseInt(v, 10);        }, format: (z) => String(z.year).padStart(4, '0')             },
+    { token: 'YY',   pattern: '\\d{2}',   parse: (v, s) => { s.year        = 2000 + parseInt(v, 10); }, format: (z) => String(z.year % 100).padStart(2, '0')       },
+    { token: 'MM',   pattern: '\\d{1,2}', parse: (v, s) => { s.month       = parseInt(v, 10);        }, format: (z) => String(z.month).padStart(2, '0')            },
+    { token: 'DD',   pattern: '\\d{1,2}', parse: (v, s) => { s.day         = parseInt(v, 10);        }, format: (z) => String(z.day).padStart(2, '0')              },
+    { token: 'HH',   pattern: '\\d{1,2}', parse: (v, s) => { s.hour        = parseInt(v, 10);        }, format: (z) => String(z.hour).padStart(2, '0')             },
+    { token: 'hh',   pattern: '\\d{1,2}', parse: (v, s) => { s.hour12      = parseInt(v, 10);        }, format: (z) => String(z.hour % 12 || 12).padStart(2, '0') },
+    { token: 'mm',   pattern: '\\d{1,2}', parse: (v, s) => { s.minute      = parseInt(v, 10);        }, format: (z) => String(z.minute).padStart(2, '0')           },
+    { token: 'ss',   pattern: '\\d{1,2}', parse: (v, s) => { s.second      = parseInt(v, 10);        }, format: (z) => String(z.second).padStart(2, '0')           },
+    { token: 'SSS',  pattern: '\\d{1,3}', parse: (v, s) => { s.millisecond = parseInt(v, 10);        }, format: (z) => String(z.millisecond).padStart(3, '0')      },
+    { token: 'M',    pattern: '\\d{1,2}', parse: (v, s) => { s.month       = parseInt(v, 10);        }, format: (z) => String(z.month)                             },
+    { token: 'D',    pattern: '\\d{1,2}', parse: (v, s) => { s.day         = parseInt(v, 10);        }, format: (z) => String(z.day)                               },
+    { token: 'H',    pattern: '\\d{1,2}', parse: (v, s) => { s.hour        = parseInt(v, 10);        }, format: (z) => String(z.hour)                              },
+    { token: 'h',    pattern: '\\d{1,2}', parse: (v, s) => { s.hour12      = parseInt(v, 10);        }, format: (z) => String(z.hour % 12 || 12)                   },
+    { token: 'm',    pattern: '\\d{1,2}', parse: (v, s) => { s.minute      = parseInt(v, 10);        }, format: (z) => String(z.minute)                            },
+    { token: 's',    pattern: '\\d{1,2}', parse: (v, s) => { s.second      = parseInt(v, 10);        }, format: (z) => String(z.second)                            },
+    { token: 'A',    pattern: 'AM|PM',    parse: (v, s) => { s.ampm        = v.toUpperCase();        }, format: (z) => z.hour < 12 ? 'AM' : 'PM'                   },
+    { token: 'a',    pattern: 'am|pm',    parse: (v, s) => { s.ampm        = v.toUpperCase();        }, format: (z) => z.hour < 12 ? 'am' : 'pm'                   },
 ];
 
 // Adjustment unit tokens mapped to their Temporal.Duration property names
@@ -108,119 +119,61 @@ function parseAdjustmentString(str: string): Temporal.DurationLike {
     return accumulated;
 }
 
-// Parse a string into a ZonedDateTime using a custom format string
-function parseCustom(str: string, fmt: string, timezone: string): Temporal.ZonedDateTime {
-    const fields: CustomField[] = [];
-    let regexStr = '^';
+// Walk a format string, calling onToken for each matched token and onLiteral for each unmatched char
+function walkFormat(fmt: string, onToken: (t: CustomToken) => void, onLiteral: (ch: string) => void): void {
     let i = 0;
-
     while (i < fmt.length) {
         let matched = false;
-        for (const { token, field, pattern } of CUSTOM_TOKENS) {
-            if (fmt.startsWith(token, i)) {
-                regexStr += `(${pattern})`;
-                fields.push(field);
-                i += token.length;
+        for (const t of CUSTOM_TOKENS) {
+            if (fmt.startsWith(t.token, i)) {
+                onToken(t);
+                i += t.token.length;
                 matched = true;
                 break;
             }
         }
-        if (!matched) {
-            regexStr += fmt[i].replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            i++;
-        }
+        if (!matched) { onLiteral(fmt[i]); i++; }
     }
+}
+
+// Parse a string into a ZonedDateTime using a custom format string
+function parseCustom(str: string, fmt: string, timezone: string): Temporal.ZonedDateTime {
+    const tokenRefs: CustomToken[] = [];
+    let regexStr = '^';
+
+    walkFormat(fmt,
+        (t) => { regexStr += `(${t.pattern})`; tokenRefs.push(t); },
+        (ch) => { regexStr += ch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); },
+    );
 
     const match = new RegExp(regexStr + '$').exec(str);
     if (!match) throw new Error(`Input '${str}' does not match custom format '${fmt}'`);
 
-    let year = 0, month = 1, day = 1, hour = 0, minute = 0, second = 0, millisecond = 0;
-    let hour12: number | null = null, ampm = 'AM';
+    const state: CustomParseState = {
+        year: 0, month: 1, day: 1,
+        hour: 0, hour12: null,
+        minute: 0, second: 0, millisecond: 0,
+        ampm: 'AM',
+    };
+    tokenRefs.forEach((t, j) => t.parse(match[j + 1], state));
 
-    for (let j = 0; j < fields.length; j++) {
-        const val = match[j + 1];
-        switch (fields[j]) {
-            case 'year':        year        = parseInt(val, 10); break;
-            case 'yearShort':   year        = 2000 + parseInt(val, 10); break;
-            case 'month':       month       = parseInt(val, 10); break;
-            case 'day':         day         = parseInt(val, 10); break;
-            case 'hour':        hour        = parseInt(val, 10); break;
-            case 'hour12':      hour12      = parseInt(val, 10); break;
-            case 'minute':      minute      = parseInt(val, 10); break;
-            case 'second':      second      = parseInt(val, 10); break;
-            case 'millisecond': millisecond = parseInt(val, 10); break;
-            case 'ampm':        ampm        = val.toUpperCase(); break;
-        }
+    if (state.hour12 !== null) {
+        if      (state.ampm === 'PM' && state.hour12 !== 12) state.hour = state.hour12 + 12;
+        else if (state.ampm === 'AM' && state.hour12 === 12) state.hour = 0;
+        else                                                 state.hour = state.hour12;
     }
 
-    if (hour12 !== null) {
-        if      (ampm === 'PM' && hour12 !== 12) hour = hour12 + 12;
-        else if (ampm === 'AM' && hour12 === 12) hour = 0;
-        else                                     hour = hour12;
-    }
-
-    return Temporal.PlainDateTime.from({ year, month, day, hour, minute, second, millisecond })
-        .toZonedDateTime(timezone);
+    return Temporal.PlainDateTime.from({
+        year: state.year, month: state.month, day: state.day,
+        hour: state.hour, minute: state.minute, second: state.second, millisecond: state.millisecond,
+    }).toZonedDateTime(timezone);
 }
 
 // Format a ZonedDateTime using a custom format string
 function formatCustom(zdt: Temporal.ZonedDateTime, fmt: string): string {
-    const h12 = zdt.hour % 12 || 12;
     let result = '';
-    let i = 0;
-
-    while (i < fmt.length) {
-        let matched = false;
-        for (const { token, field, pad } of CUSTOM_TOKENS) {
-            if (fmt.startsWith(token, i)) {
-                let val: number | string;
-                switch (field) {
-                    case 'year':        val = zdt.year;        break;
-                    case 'yearShort':   val = zdt.year % 100;  break;
-                    case 'month':       val = zdt.month;       break;
-                    case 'day':         val = zdt.day;         break;
-                    case 'hour':        val = zdt.hour;        break;
-                    case 'hour12':      val = h12;             break;
-                    case 'minute':      val = zdt.minute;      break;
-                    case 'second':      val = zdt.second;      break;
-                    case 'millisecond': val = zdt.millisecond; break;
-                    case 'ampm':        val = token === 'A' ? (zdt.hour < 12 ? 'AM' : 'PM') : (zdt.hour < 12 ? 'am' : 'pm'); break;
-                    default:            val = '';              break;
-                }
-                result += pad > 0 ? String(val).padStart(pad, '0') : String(val);
-                i += token.length;
-                matched = true;
-                break;
-            }
-        }
-        if (!matched) {
-            result += fmt[i];
-            i++;
-        }
-    }
-
+    walkFormat(fmt, (t) => { result += t.format(zdt); }, (ch) => { result += ch; });
     return result;
-}
-
-// Format a ZonedDateTime as RFC 2822
-function formatRfc2822(zdt: Temporal.ZonedDateTime): string {
-    const DAYS   = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-    const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
-    const dow  = DAYS[new Date(zdt.epochMilliseconds).getUTCDay()];
-    const dd   = String(zdt.day).padStart(2, '0');
-    const mon  = MONTHS[zdt.month - 1];
-    const HH   = String(zdt.hour).padStart(2, '0');
-    const mm   = String(zdt.minute).padStart(2, '0');
-    const ss   = String(zdt.second).padStart(2, '0');
-
-    const offsetSecs = zdt.offsetNanoseconds / 1_000_000_000;
-    const sign  = offsetSecs >= 0 ? '+' : '-';
-    const absS  = Math.abs(offsetSecs);
-    const offHH = String(Math.floor(absS / 3600)).padStart(2, '0');
-    const offMM = String(Math.floor((absS % 3600) / 60)).padStart(2, '0');
-
-    return `${dow}, ${dd} ${mon} ${zdt.year} ${HH}:${mm}:${ss} ${sign}${offHH}${offMM}`;
 }
 
 @NodeDescription({
@@ -240,31 +193,40 @@ export class TemporalTransformNode extends BaseNode<TemporalTransformNodeConfig>
     @onInput()
     protected async onInput(message: any, _errorHandler: Function): Promise<void> {
         try {
-            // 1. Parse input to ZonedDateTime
-            const inputTimezone = this.resolveValue(message, this.config().inputTimezone, this.config().inputTimezoneType);
-            const inputFormat   = this.resolveValue(message, this.config().inputFormat,   this.config().inputFormatType);
-            const inputValue    = this.resolveValue(message, this.config().inputFrom,     this.config().inputFromType);
-            const zdt = this.parseInput(inputValue, String(inputFormat), String(inputTimezone));
+            // 1. Resolve the input and output config.
+            const inputTimezone = String(this.resolveValue(message, this.config().inputTimezone, this.config().inputTimezoneType));
+            const inputFormat   = String(this.resolveValue(message, this.config().inputFormat,   this.config().inputFormatType));
+            const inputValue    = String(this.resolveValue(message, this.config().inputFrom,     this.config().inputFromType));
 
-            // 2. Apply adjustment
+            const outputTimezone = String(this.resolveValue(message, this.config().outputTimezone, this.config().outputTimezoneType));
+            const outputFormat = String(this.resolveValue(message, this.config().outputFormat, this.config().outputFormatType));
+
+            // 2. Parse the input values.
+            const zdt = NAMED_FORMATS[inputFormat] 
+                ? NAMED_FORMATS[inputFormat].parse(inputValue, inputTimezone) 
+                : parseCustom(inputValue, inputFormat, inputTimezone);
+
+            // 3. Apply adjustment
             const adjustmentString = this.config().adjustmentString;
             const adjusted = adjustmentString?.trim()
                 ? zdt.add(parseAdjustmentString(adjustmentString))
                 : zdt;
 
-            // 3. Convert to output timezone
-            const outputTimezone = this.resolveValue(message, this.config().outputTimezone, this.config().outputTimezoneType);
-            const zdtOut = adjusted.withTimeZone(String(outputTimezone));
+            // 4. apply timezone and format.
+            const TimezonedOutput = adjusted.withTimeZone(outputTimezone);
+            const output = NAMED_FORMATS[outputFormat]
+                ? NAMED_FORMATS[outputFormat].format(TimezonedOutput) 
+                : formatCustom(TimezonedOutput, outputFormat);
+            
+            // 5. Write output.
+            this.writeOutput(message, output);
+            this.node().send(message);
 
-            // 4. Format and write output
-            const outputFormat = this.resolveValue(message, this.config().outputFormat, this.config().outputFormatType);
-            this.writeOutput(message, this.formatOutput(zdtOut, String(outputFormat)));
-
-            (this.node() as any).send(message);
-        } catch (err: any) {
+        } 
+        catch (err: any) {
             console.log(err);
             this.node().warn(`TemporalTransform [${this.name()}]: ${err.message}`);
-            // Drop the message — do not send
+            // Drop the message, do not send
         }
     }
 
@@ -274,83 +236,8 @@ export class TemporalTransformNode extends BaseNode<TemporalTransformNodeConfig>
             case 'msg':    return getProperty(message, value);
             case 'flow':   return (this.node() as any).context().flow.get(value);
             case 'global': return (this.node() as any).context().global.get(value);
-            case 'date':   return null;  // handled in parseInput
-            default:       return value; // 'tz', 'preset', 'custom' — value IS the literal
-        }
-    }
-
-    // Parse a raw value into a ZonedDateTime using the given format and timezone
-    private parseInput(value: any, format: string, timezone: string): Temporal.ZonedDateTime {
-        // "timestamp (now)" — ignore the input value entirely
-        if (this.config().inputFromType === 'date') {
-            return Temporal.Now.zonedDateTimeISO(timezone);
-        }
-
-        const str = String(value);
-
-        switch (format) {
-            case 'iso': {
-                try {
-                    return Temporal.ZonedDateTime.from(str);
-                } catch {
-                    return Temporal.Instant.from(str).toZonedDateTimeISO(timezone);
-                }
-            }
-            case 'iso-utc':
-                return Temporal.Instant.from(str).toZonedDateTimeISO(timezone);
-
-            case 'date':
-                return Temporal.PlainDate.from(str).toZonedDateTime({
-                    timeZone:  timezone,
-                    plainTime: Temporal.PlainTime.from('00:00:00'),
-                });
-
-            case 'datetime':
-                return Temporal.PlainDateTime.from(str.replace(' ', 'T')).toZonedDateTime(timezone);
-
-            case 'unix-s':
-                return Temporal.Instant.fromEpochMilliseconds(Number(value) * 1000).toZonedDateTimeISO(timezone);
-
-            case 'unix-ms':
-                return Temporal.Instant.fromEpochMilliseconds(Number(value)).toZonedDateTimeISO(timezone);
-
-            case 'rfc2822': {
-                const ms = new Date(str).getTime();
-                if (isNaN(ms)) throw new Error(`Could not parse RFC 2822 date: '${str}'`);
-                return Temporal.Instant.fromEpochMilliseconds(ms).toZonedDateTimeISO(timezone);
-            }
-
-            default:
-                return parseCustom(str, format, timezone);
-        }
-    }
-
-    // Format a ZonedDateTime for output
-    private formatOutput(zdt: Temporal.ZonedDateTime, format: string): string | number {
-        switch (format) {
-            case 'iso':
-                return zdt.toString();
-
-            case 'iso-utc':
-                return zdt.toInstant().toString();
-
-            case 'date':
-                return zdt.toPlainDate().toString();
-
-            case 'datetime':
-                return `${zdt.toPlainDate()} ${zdt.toPlainTime().toString({ smallestUnit: 'second' })}`;
-
-            case 'unix-s':
-                return Math.floor(zdt.epochMilliseconds / 1000);
-
-            case 'unix-ms':
-                return zdt.epochMilliseconds;
-
-            case 'rfc2822':
-                return formatRfc2822(zdt);
-
-            default:
-                return formatCustom(zdt, format);
+            case 'date':   return Date.now();
+            default:       return value;
         }
     }
 

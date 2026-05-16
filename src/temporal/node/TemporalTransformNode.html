@@ -57,6 +57,20 @@
     </style>
 
     <script type="text/javascript">
+        // Fetch named format list once and cache it.
+        window._temporalFormats = null;
+
+        function _temporalGetFormats(callback) {
+            if (window._temporalFormats) { callback(window._temporalFormats); return; }
+            $.getJSON('temporal/formats').done(function(data) {
+                window._temporalFormats = data;
+                callback(data);
+            }).fail(function() {
+                window._temporalFormats = [];
+                callback([]);
+            });
+        }
+
         // Fetch timezone list once and cache it.
         window._temporalTimezones = null;
 
@@ -104,7 +118,7 @@
             });
         }
 
-        // Adjustment string parser — returns a human-readable description or null on error.
+        // Adjustment string parser: returns a human-readable description or null on error.
         var TEMPORAL_ADJUSTMENT_UNITS = [
             { token: 'y', label: 'year',   plural: 'years'   },
             { token: 'M', label: 'month',  plural: 'months'  },
@@ -123,7 +137,7 @@
                 return u.token + ' (' + u.plural + ')';
             }).join(', ');
 
-            // Step 1: strip all whitespace — spaces don't affect meaning.
+            // Step 1: strip all whitespace (spaces don't affect meaning)
             var s = str.replace(/\s+/g, '');
             if (s.length === 0) return { parts: [], valid: true };
 
@@ -189,90 +203,69 @@
 
     let node = this;
 
-    var FORMAT_TYPES = [
-        {
-            value: 'preset',
-            label: 'preset',
-            icon: 'fa fa-list',
-            options: [
-                { value: 'iso',      label: 'ISO 8601 with offset (2024-05-16T14:30:00+02:00)' },
-                { value: 'iso-utc',  label: 'ISO 8601 UTC (2024-05-16T12:30:00.000Z)' },
-                { value: 'date',     label: 'Date only (2024-05-16)' },
-                { value: 'datetime', label: 'Date + Time (2024-05-16 14:30:00)' },
-                { value: 'unix-s',   label: 'Unix timestamp (seconds)' },
-                { value: 'unix-ms',  label: 'Unix timestamp (milliseconds)' },
-                { value: 'rfc2822',  label: 'RFC 2822 (Thu, 16 May 2024 14:30:00 +0200)' },
-            ]
-        },
-        {
-            value: 'custom',
-            label: 'custom',
-            icon: 'fa fa-pencil',
-            hasValue: true,
-            validate: function(v) { return v.length > 0; }
-        },
-        'msg'
-    ];
-
     var TIMEZONE_TYPES = [
         { value: 'tz', label: 'timezone', icon: 'fa fa-globe', hasValue: true, validate: function(v) { return v.length > 0; } },
         'msg', 'flow', 'global'
     ];
 
-    // ── Input From ──────────────────────────────────────────────────────────
-    $('#node-input-inputFrom').typedInput({
-        typeField: '#node-input-inputFromType',
-        types: ['msg', 'flow', 'global', { value: 'date', label: 'timestamp (now)', icon: 'fa fa-clock-o', hasValue: false }]
-    }).on('change', function(event, type) {
-        var $fmt = $('#node-input-inputFormat');
-        if (type === 'date') {
-            $fmt.typedInput('type', 'preset');
-            $fmt.typedInput('value', 'unix-ms');
-            $fmt.typedInput('disable');
-            node._def.defaults.inputFrom.required = false;
-        } else {
-            $fmt.typedInput('enable');
-            node._def.defaults.inputFrom.required = true;
-        }
+    // Input / Output Format (async: options fetched from server)
+    _temporalGetFormats(function(formats) {
+        var FORMAT_TYPES = [
+            { value: 'preset', label: 'preset', icon: 'fa fa-list', options: formats },
+            { value: 'custom', label: 'custom', icon: 'fa fa-pencil', hasValue: true, validate: function(v) { return v.length > 0; } },
+            'msg'
+        ];
+
+        $('#node-input-inputFormat').typedInput({
+            typeField: '#node-input-inputFormatType',
+            types: FORMAT_TYPES
+        });
+
+        $('#node-input-outputFormat').typedInput({
+            typeField: '#node-input-outputFormatType',
+            types: FORMAT_TYPES
+        });
+
+        // Input From - initialised here so the change handler can safely call
+        // enable/disable on inputFormat, which is now guaranteed to exist.
+        $('#node-input-inputFrom').typedInput({
+            typeField: '#node-input-inputFromType',
+            types: ['msg', 'flow', 'global', { value: 'date', label: 'timestamp (now)', icon: 'fa fa-clock-o', hasValue: false }]
+        }).on('change', function(event, type) {
+            var $fmt = $('#node-input-inputFormat');
+            if (type === 'date') {
+                $fmt.typedInput('type', 'preset');
+                $fmt.typedInput('value', 'unix-ms');
+                $fmt.typedInput('disable');
+                node._def.defaults.inputFrom.required = false;
+            } else {
+                $fmt.typedInput('enable');
+                node._def.defaults.inputFrom.required = true;
+            }
+        });
     });
 
-    // ── Input Format ─────────────────────────────────────────────────────────
-    $('#node-input-inputFormat').typedInput({
-        typeField: '#node-input-inputFormatType',
-        types: FORMAT_TYPES
-    });
-    // Apply locked state immediately if restoring a saved 'date' node.
-    if ($('#node-input-inputFromType').val() === 'date') {
-        $('#node-input-inputFormat').typedInput('disable');
-    }
-
-    // ── Input Timezone ───────────────────────────────────────────────────────
+    //  Input Timezone
     $('#node-input-inputTimezone').typedInput({
         typeField: '#node-input-inputTimezoneType',
         types: TIMEZONE_TYPES
     });
     _temporalBindTimezoneAutocomplete('node-input-inputTimezone');
 
-    // ── Output To ────────────────────────────────────────────────────────────
+    // Output To
     $('#node-input-outputTo').typedInput({
         typeField: '#node-input-outputToType',
         types: ['msg', 'flow', 'global']
     });
 
-    // ── Output Format ────────────────────────────────────────────────────────
-    $('#node-input-outputFormat').typedInput({
-        typeField: '#node-input-outputFormatType',
-        types: FORMAT_TYPES
-    });
-
-    // ── Output Timezone ──────────────────────────────────────────────────────
+    // Output Timezone 
     $('#node-input-outputTimezone').typedInput({
         typeField: '#node-input-outputTimezoneType',
         types: TIMEZONE_TYPES
     });
     _temporalBindTimezoneAutocomplete('node-input-outputTimezone');
 
-    // ── Adjustment preview ───────────────────────────────────────────────────
+    // Adjustment preview
     function updateAdjustmentPreview() {
         var str = $('#node-input-adjustmentString').val();
         var result = _temporalDescribeAdjustment(str);
@@ -293,7 +286,6 @@
 </script>
 
 <script type="text/html" template-section="onIncludeEditForm">
-    <!-- hidden type fields for typedInput -->
     <input type="hidden" id="node-input-inputFromType" />
     <input type="hidden" id="node-input-inputFormatType" />
     <input type="hidden" id="node-input-inputTimezoneType" />
@@ -301,13 +293,13 @@
     <input type="hidden" id="node-input-outputFormatType" />
     <input type="hidden" id="node-input-outputTimezoneType" />
 
-    <!-- Name -->
+    <!-- NAME -->
     <div class="form-row">
         <label class="towb_editorlabel" for="node-input-name"><i class="fa fa-tag"></i> Name</label>
         <input type="text" id="node-input-name" placeholder="Temporal Transform" />
     </div>
 
-    <!-- ── INPUT ── -->
+    <!-- INPUT -->
     <div class="temporal-section-header">Input</div>
 
     <div class="form-row">
@@ -325,7 +317,7 @@
         <input type="text" id="node-input-inputTimezone" />
     </div>
 
-    <!-- ── MODIFICATION ── -->
+    <!-- MODIFICATION -->
     <div class="temporal-section-header">Modification</div>
 
     <div class="form-row">
@@ -334,7 +326,7 @@
     </div>
     <div id="temporal-adjustment-preview" class="temporal-adjustment-preview"></div>
 
-    <!-- ── OUTPUT ── -->
+    <!-- OUTPUT -->
     <div class="temporal-section-header">Output</div>
 
     <div class="form-row">
@@ -354,26 +346,94 @@
 </script>
 
 <script type="text/markdown" template-section="onIncludeDocumentation">
-Transforms a date/time value from one representation to another. Supports parsing, timezone conversion, and temporal adjustments.
+Transforms a date/time value from one representation to another. Supports parsing, timezone conversion, optional adjustment, and formatting - all in a single node.
 
 ### Input section
 
-: *From*     : Where to read the input value. Choose `msg`, `flow`, or `global` to read from a message property or context, or select **timestamp (now)** to use the current time.
-: *Timezone* : The timezone of the input value. Accepts IANA names (`Europe/Amsterdam`) or UTC offset strings (`+02:00`). Can also be read from a message/context property.
+: *From*     : Where to read the date/time value. Choose `msg`, `flow`, or `global` to read from a property or context variable, or select **timestamp (now)** to use the current time at the moment the message arrives.
+: *Format*   : How the input value is encoded. Choose a named preset or select **custom** to enter a format string. Can also be read dynamically from `msg`, `flow`, or `global`.
+: *Timezone* : The timezone the input value is expressed in. Required for formats that carry no timezone information (`date`, `datetime`, `unix-s`, `unix-ms`, custom). Accepts IANA names (`Europe/Amsterdam`) or UTC offset strings (`+02:00`). Can also be read from a property.
+
+> When **From** is **timestamp (now)**, the Format field is locked to *Unix timestamp (milliseconds)* and Timezone has no effect.
+
+---
 
 ### Modification section
 
-: *Adjust by* : An optional adjustment string that shifts the time value. Units: `y` years, `M` months, `w` weeks, `d` days, `H` hours, `m` minutes, `s` seconds. Prefix with `+` or `-`. Example: `+1y -2M +3d` adds 1 year, subtracts 2 months, and adds 3 days.
+: *Adjust by* : An optional expression that shifts the time value before output. Leave empty to pass through unchanged. A live preview below the field describes the adjustment in plain English; invalid expressions are highlighted in red.
+
+**Adjustment units**
+
+| Token | Unit | Token | Unit |
+|-------|------|-------|------|
+| `y` | Years | `H` | Hours |
+| `M` | Months | `m` | Minutes |
+| `w` | Weeks | `s` | Seconds |
+| `d` | Days | `S` | Milliseconds |
+
+Tokens are **case-sensitive** (`M` = months, `m` = minutes; `H` = hours, `S` = milliseconds).
+
+**Syntax:** prefix a group with `+` or `-`; the sign applies to all units that follow until the next sign.
+
+- `+1y -2M +3d` - add 1 year, subtract 2 months, add 3 days
+- `-1H30m` - subtract 1 hour **and** 30 minutes
+- `+1y4d-40m+20m` - add 1 year, add 4 days, subtract net 20 minutes
+
+Calendar units (`y`, `M`) are applied relative to the calendar date and the result is clamped to the last valid day of the month (e.g. adding 1 month to Jan 31 yields Feb 28/29).
+
+---
 
 ### Output section
 
-: *Format*   : How to format the result. Choose from ISO 8601, date-only, Unix timestamps, or RFC 2822.
-: *Timezone* : The timezone to express the output in. Accepts IANA names or UTC offset strings.
 : *To*       : Where to write the result. Choose `msg`, `flow`, or `global`.
+: *Format*   : How to encode the output value. Choose a named preset or select **custom** to enter a format string. Can also be read dynamically from a property.
+: *Timezone* : The timezone to express the output in. Accepts IANA names or UTC offset strings.
 
-### Notes
+---
 
-- If the input value cannot be parsed as a valid date/time, the message is dropped and a warning is logged.
-- When *From* is set to **timestamp (now)**, the *Input Timezone* field is ignored.
-- Calendar units (`y`, `M`) are applied first and cannot be normalised across month boundaries.
+### Format presets
+
+| Preset | Description | Example |
+|--------|-------------|---------|
+| `iso` | ISO 8601 with offset | `2024-05-16T14:30:00+02:00` |
+| `iso-utc` | ISO 8601 UTC | `2024-05-16T12:30:00.000Z` |
+| `date` | Date only | `2024-05-16` |
+| `datetime` | Date and local time | `2024-05-16 14:30:00` |
+| `unix-s` | Unix timestamp (seconds) | `1715860200` |
+| `unix-ms` | Unix timestamp (milliseconds) | `1715860200000` |
+| `rfc2822` | RFC 2822 | `Thu, 16 May 2024 14:30:00 +0200` |
+
+---
+
+### Custom format tokens
+
+Select **custom** to enter a Moment.js-style format string. Tokens are case-sensitive and matched longest-first.
+
+| Token | Description | Output | Token | Description | Output |
+|-------|-------------|--------|-------|-------------|--------|
+| `YYYY` | Year (4-digit) | `2024` | `hh` | Hour 12 h, padded | `02` |
+| `YY` | Year (2-digit) | `24` | `h` | Hour 12 h | `2` |
+| `MM` | Month, padded | `05` | `mm` | Minute, padded | `30` |
+| `M` | Month | `5` | `m` | Minute | `30` |
+| `DD` | Day, padded | `06` | `ss` | Second, padded | `05` |
+| `D` | Day | `6` | `s` | Second | `5` |
+| `HH` | Hour 24 h, padded | `14` | `SSS` | Milliseconds | `047` |
+| `H` | Hour 24 h | `14` | `A` / `a` | AM/PM or am/pm | `PM` |
+
+Any character that does not match a token is treated as a literal (e.g. `-`, `/`, `:`, space).
+
+**Examples**
+
+| Format string | Output |
+|---------------|--------|
+| `YYYY-MM-DD` | `2024-05-16` |
+| `DD/MM/YYYY HH:mm:ss` | `16/05/2024 14:30:05` |
+| `YYYY-MM-DD HH:mm:ss.SSS` | `2024-05-16 14:30:05.047` |
+| `hh:mm:ss A` | `02:30:05 PM` |
+
+---
+
+### Error handling
+
+If the input cannot be parsed, the message is **dropped** and a **warning** is logged on the node. Downstream nodes will only receive messages that were transformed successfully.
 </script>
