@@ -1,0 +1,379 @@
+<script type="text/javascript" template-section="onCompose">
+    node
+        .addDefault("name",              { value: "", required: false })
+        .addDefault("inputFrom",         { value: "payload", required: true })
+        .addDefault("inputFromType",     { value: "msg", required: true })
+        .addDefault("inputFormat",       { value: "iso-utc", required: true })
+        .addDefault("inputFormatType",   { value: "preset", required: true })
+        .addDefault("inputTimezone",     { value: "UTC", required: false })
+        .addDefault("inputTimezoneType", { value: "tz", required: false })
+        .addDefault("adjustmentString",  { value: "", required: false, validate: function(v) {
+            if (!v || v.trim() === '') return true;
+            return !_temporalParseAdjustment(v).error;
+        }})
+        .addDefault("outputTo",          { value: "payload", required: true })
+        .addDefault("outputToType",      { value: "msg", required: true })
+        .addDefault("outputFormat",      { value: "iso-utc", required: true })
+        .addDefault("outputFormatType",  { value: "preset", required: true })
+        .addDefault("outputTimezone",    { value: "UTC", required: false })
+        .addDefault("outputTimezoneType",{ value: "tz", required: false })
+        .setPaletteLabel("Temporal Transform")
+        .setColor("#7B68EE")
+        .setIcon("temporal.png")
+        .setLabelStyle("node_label_white")
+        .setLabel(function() { return this.name || "Temporal Transform"; })
+        .setInput("in")
+        .addOutputs("out")
+</script>
+
+<div template-section="onIncludeOnce">
+    <style>
+        .temporal-section-header {
+            font-weight: bold;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: #888;
+            margin: 14px 0 6px 0;
+            padding-bottom: 4px;
+            border-bottom: 1px solid #e0e0e0;
+        }
+        .temporal-adjustment-preview {
+            font-size: 11px;
+            color: #555;
+            margin-top: 4px;
+            margin-left: 108px;
+            min-height: 16px;
+        }
+        .temporal-adjustment-preview.invalid {
+            color: #c0392b;
+        }
+        .ui-autocomplete {
+            max-height: 200px;
+            overflow-y: auto;
+            overflow-x: hidden;
+            z-index: 9999 !important;
+        }
+    </style>
+
+    <script type="text/javascript">
+        // Fetch timezone list once and cache it.
+        window._temporalTimezones = null;
+
+        function _temporalGetTimezones(callback) {
+            if (window._temporalTimezones) {
+                callback(window._temporalTimezones);
+                return;
+            }
+            $.getJSON('temporal/timezones').done(function(data) {
+                window._temporalTimezones = data;
+                callback(data);
+            }).fail(function() {
+                window._temporalTimezones = [];
+                callback([]);
+            });
+        }
+
+        // Attach jQuery UI autocomplete to the inner <input> of a typedInput field.
+        // Only activates when the typedInput type is 'tz'.
+        function _temporalBindTimezoneAutocomplete(inputId) {
+            _temporalGetTimezones(function(timezones) {
+                var $outer = $('#' + inputId);
+                var $inner = $outer.siblings('.red-ui-typedInput-container')
+                                .find('input.red-ui-typedInput-input');
+                if (!$inner.length) {
+                    $inner = $outer;
+                }
+                $inner.autocomplete({
+                    search: function() {
+                        if ($outer.typedInput('type') !== 'tz') return false;
+                    },
+                    source: function(request, response) {
+                        var term = request.term.toLowerCase();
+                        var matches = timezones.filter(function(tz) {
+                            return tz.toLowerCase().indexOf(term) !== -1;
+                        }).slice(0, 30);
+                        response(matches);
+                    },
+                    minLength: 1,
+                    select: function(event, ui) {
+                        $inner.val(ui.item.value).trigger('change');
+                        return false;
+                    }
+                });
+            });
+        }
+
+        // Adjustment string parser — returns a human-readable description or null on error.
+        var TEMPORAL_ADJUSTMENT_UNITS = [
+            { token: 'y', label: 'year',   plural: 'years'   },
+            { token: 'M', label: 'month',  plural: 'months'  },
+            { token: 'w', label: 'week',   plural: 'weeks'   },
+            { token: 'd', label: 'day',    plural: 'days'    },
+            { token: 'H', label: 'hour',   plural: 'hours'   },
+            { token: 'm', label: 'minute', plural: 'minutes' },
+            { token: 's', label: 'second',      plural: 'seconds'      },
+            { token: 'S', label: 'millisecond', plural: 'milliseconds' },
+        ];
+
+        function _temporalParseAdjustment(str) {
+            if (!str || str.trim() === '') return { parts: [], valid: true };
+
+            var UNITS_HELP = TEMPORAL_ADJUSTMENT_UNITS.map(function(u) {
+                return u.token + ' (' + u.plural + ')';
+            }).join(', ');
+
+            // Step 1: strip all whitespace — spaces don't affect meaning.
+            var s = str.replace(/\s+/g, '');
+            if (s.length === 0) return { parts: [], valid: true };
+
+            // Step 2: split into signed terms on + / - boundaries.
+            // The lookahead keeps the sign character as the first char of each term.
+            // e.g. "+1H-25m-45m" → ["+1H", "-25m", "-45m"]
+            // e.g. "+1y3m7d"     → ["+1y3m7d"]   (no split inside a term)
+            var terms = s.split(/(?=[+-])/).filter(function(t) { return t.length > 0; });
+
+            // Step 3: expand each term into individual unit components.
+            // "+1y3m7d" → sign=+1, pairs: 1y, 3m, 7d → +1y, +3m, +7d
+            var accumulated = {};
+            for (var i = 0; i < terms.length; i++) {
+                var term = terms[i];
+                var sign = (term[0] === '-') ? -1 : 1;
+                var body = (term[0] === '+' || term[0] === '-') ? term.slice(1) : term;
+
+                if (body.length === 0) {
+                    return { error: "Expected a number and unit after '" + term[0] + "'" };
+                }
+                if (body.replace(/\d+[a-zA-Z]/g, '').length > 0) {
+                    return { error: "Unexpected characters in '" + term + "'" };
+                }
+
+                var pairPattern = /(\d+)([a-zA-Z])/g;
+                var match;
+                while ((match = pairPattern.exec(body)) !== null) {
+                    var token = match[2];
+                    var unit  = TEMPORAL_ADJUSTMENT_UNITS.find(function(u) { return u.token === token; });
+                    if (!unit) {
+                        return { error: "Invalid unit '" + token + "'. Supported units are: " + UNITS_HELP };
+                    }
+                    accumulated[token] = (accumulated[token] || 0) + sign * parseInt(match[1], 10);
+                }
+            }
+
+            // Return parts in canonical unit order, skipping any that summed to zero.
+            var parts = TEMPORAL_ADJUSTMENT_UNITS
+                .filter(function(u) { return u.token in accumulated && accumulated[u.token] !== 0; })
+                .map(function(u) { return { amount: accumulated[u.token], unit: u }; });
+
+            return { parts: parts, valid: true };
+        }
+
+        function _temporalDescribeAdjustment(str) {
+            var result = _temporalParseAdjustment(str);
+            if (result.error) return { text: result.error, valid: false };
+            if (result.parts.length === 0) return { text: 'No adjustment (pass-through)', valid: true };
+
+            var descriptions = result.parts.map(function(p) {
+                var verb   = p.amount >= 0 ? 'Add' : 'Subtract';
+                var absAmt = Math.abs(p.amount);
+                var label  = absAmt === 1 ? p.unit.label : p.unit.plural;
+                return verb + ' ' + absAmt + ' ' + label;
+            });
+
+            return { text: descriptions.join(', '), valid: true };
+        }
+    </script>
+</div>
+
+<script type="text/javascript" template-section="onIncludeEditPrepare">
+
+    let node = this;
+
+    var FORMAT_TYPES = [
+        {
+            value: 'preset',
+            label: 'preset',
+            icon: 'fa fa-list',
+            options: [
+                { value: 'iso',      label: 'ISO 8601 with offset (2024-05-16T14:30:00+02:00)' },
+                { value: 'iso-utc',  label: 'ISO 8601 UTC (2024-05-16T12:30:00.000Z)' },
+                { value: 'date',     label: 'Date only (2024-05-16)' },
+                { value: 'datetime', label: 'Date + Time (2024-05-16 14:30:00)' },
+                { value: 'unix-s',   label: 'Unix timestamp (seconds)' },
+                { value: 'unix-ms',  label: 'Unix timestamp (milliseconds)' },
+                { value: 'rfc2822',  label: 'RFC 2822 (Thu, 16 May 2024 14:30:00 +0200)' },
+            ]
+        },
+        {
+            value: 'custom',
+            label: 'custom',
+            icon: 'fa fa-pencil',
+            hasValue: true,
+            validate: function(v) { return v.length > 0; }
+        },
+        'msg'
+    ];
+
+    var TIMEZONE_TYPES = [
+        { value: 'tz', label: 'timezone', icon: 'fa fa-globe', hasValue: true, validate: function(v) { return v.length > 0; } },
+        'msg', 'flow', 'global'
+    ];
+
+    // ── Input From ──────────────────────────────────────────────────────────
+    $('#node-input-inputFrom').typedInput({
+        typeField: '#node-input-inputFromType',
+        types: ['msg', 'flow', 'global', { value: 'date', label: 'timestamp (now)', icon: 'fa fa-clock-o', hasValue: false }]
+    }).on('change', function(event, type) {
+        var $fmt = $('#node-input-inputFormat');
+        if (type === 'date') {
+            $fmt.typedInput('type', 'preset');
+            $fmt.typedInput('value', 'unix-ms');
+            $fmt.typedInput('disable');
+            node._def.defaults.inputFrom.required = false;
+        } else {
+            $fmt.typedInput('enable');
+            node._def.defaults.inputFrom.required = true;
+        }
+    });
+
+    // ── Input Format ─────────────────────────────────────────────────────────
+    $('#node-input-inputFormat').typedInput({
+        typeField: '#node-input-inputFormatType',
+        types: FORMAT_TYPES
+    });
+    // Apply locked state immediately if restoring a saved 'date' node.
+    if ($('#node-input-inputFromType').val() === 'date') {
+        $('#node-input-inputFormat').typedInput('disable');
+    }
+
+    // ── Input Timezone ───────────────────────────────────────────────────────
+    $('#node-input-inputTimezone').typedInput({
+        typeField: '#node-input-inputTimezoneType',
+        types: TIMEZONE_TYPES
+    });
+    _temporalBindTimezoneAutocomplete('node-input-inputTimezone');
+
+    // ── Output To ────────────────────────────────────────────────────────────
+    $('#node-input-outputTo').typedInput({
+        typeField: '#node-input-outputToType',
+        types: ['msg', 'flow', 'global']
+    });
+
+    // ── Output Format ────────────────────────────────────────────────────────
+    $('#node-input-outputFormat').typedInput({
+        typeField: '#node-input-outputFormatType',
+        types: FORMAT_TYPES
+    });
+
+    // ── Output Timezone ──────────────────────────────────────────────────────
+    $('#node-input-outputTimezone').typedInput({
+        typeField: '#node-input-outputTimezoneType',
+        types: TIMEZONE_TYPES
+    });
+    _temporalBindTimezoneAutocomplete('node-input-outputTimezone');
+
+    // ── Adjustment preview ───────────────────────────────────────────────────
+    function updateAdjustmentPreview() {
+        var str = $('#node-input-adjustmentString').val();
+        var result = _temporalDescribeAdjustment(str);
+        var $preview = $('#temporal-adjustment-preview');
+        $preview.text(result.text);
+        $preview.toggleClass('invalid', !result.valid);
+    }
+    $('#node-input-adjustmentString').on('input', updateAdjustmentPreview);
+    updateAdjustmentPreview();
+</script>
+
+<script type="text/javascript" template-section="onIncludeEditSave">
+    // typedInput auto-saves outputFormat and outputFormatType via node-input-* naming
+</script>
+
+<script type="text/javascript" template-section="onIncludeEditCancel">
+    // nothing to dispose
+</script>
+
+<script type="text/html" template-section="onIncludeEditForm">
+    <!-- hidden type fields for typedInput -->
+    <input type="hidden" id="node-input-inputFromType" />
+    <input type="hidden" id="node-input-inputFormatType" />
+    <input type="hidden" id="node-input-inputTimezoneType" />
+    <input type="hidden" id="node-input-outputToType" />
+    <input type="hidden" id="node-input-outputFormatType" />
+    <input type="hidden" id="node-input-outputTimezoneType" />
+
+    <!-- Name -->
+    <div class="form-row">
+        <label class="towb_editorlabel" for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+        <input type="text" id="node-input-name" placeholder="Temporal Transform" />
+    </div>
+
+    <!-- ── INPUT ── -->
+    <div class="temporal-section-header">Input</div>
+
+    <div class="form-row">
+        <label class="towb_editorlabel" for="node-input-inputFrom"><i class="fa fa-sign-in"></i> From</label>
+        <input type="text" id="node-input-inputFrom" />
+    </div>
+
+    <div class="form-row">
+        <label class="towb_editorlabel" for="node-input-inputFormat"><i class="fa fa-list"></i> Format</label>
+        <input type="text" id="node-input-inputFormat" />
+    </div>
+
+    <div class="form-row">
+        <label class="towb_editorlabel" for="node-input-inputTimezone"><i class="fa fa-globe"></i> Timezone</label>
+        <input type="text" id="node-input-inputTimezone" />
+    </div>
+
+    <!-- ── MODIFICATION ── -->
+    <div class="temporal-section-header">Modification</div>
+
+    <div class="form-row">
+        <label class="towb_editorlabel" for="node-input-adjustmentString"><i class="fa fa-clock-o"></i> Adjust by</label>
+        <input type="text" id="node-input-adjustmentString" placeholder="e.g. +1y -2M +3d" style="width: calc(70% - 10px);" />
+    </div>
+    <div id="temporal-adjustment-preview" class="temporal-adjustment-preview"></div>
+
+    <!-- ── OUTPUT ── -->
+    <div class="temporal-section-header">Output</div>
+
+    <div class="form-row">
+        <label class="towb_editorlabel" for="node-input-outputTo"><i class="fa fa-sign-out"></i> To</label>
+        <input type="text" id="node-input-outputTo" />
+    </div>
+
+    <div class="form-row">
+        <label class="towb_editorlabel" for="node-input-outputFormat"><i class="fa fa-list"></i> Format</label>
+        <input type="text" id="node-input-outputFormat" />
+    </div>
+
+    <div class="form-row">
+        <label class="towb_editorlabel" for="node-input-outputTimezone"><i class="fa fa-globe"></i> Timezone</label>
+        <input type="text" id="node-input-outputTimezone" />
+    </div>
+</script>
+
+<script type="text/markdown" template-section="onIncludeDocumentation">
+Transforms a date/time value from one representation to another. Supports parsing, timezone conversion, and temporal adjustments.
+
+### Input section
+
+: *From*     : Where to read the input value. Choose `msg`, `flow`, or `global` to read from a message property or context, or select **timestamp (now)** to use the current time.
+: *Timezone* : The timezone of the input value. Accepts IANA names (`Europe/Amsterdam`) or UTC offset strings (`+02:00`). Can also be read from a message/context property.
+
+### Modification section
+
+: *Adjust by* : An optional adjustment string that shifts the time value. Units: `y` years, `M` months, `w` weeks, `d` days, `H` hours, `m` minutes, `s` seconds. Prefix with `+` or `-`. Example: `+1y -2M +3d` adds 1 year, subtracts 2 months, and adds 3 days.
+
+### Output section
+
+: *Format*   : How to format the result. Choose from ISO 8601, date-only, Unix timestamps, or RFC 2822.
+: *Timezone* : The timezone to express the output in. Accepts IANA names or UTC offset strings.
+: *To*       : Where to write the result. Choose `msg`, `flow`, or `global`.
+
+### Notes
+
+- If the input value cannot be parsed as a valid date/time, the message is dropped and a warning is logged.
+- When *From* is set to **timestamp (now)**, the *Input Timezone* field is ignored.
+- Calendar units (`y`, `M`) are applied first and cannot be normalised across month boundaries.
+</script>
