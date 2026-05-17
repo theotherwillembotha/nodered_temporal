@@ -1,6 +1,6 @@
 {
   "name": "@theotherwillembotha/node-red-temporal",
-  "version": "0.0.54",
+  "version": "0.0.55",
   "description": "Time value manipulation nodes for Node-RED. Built on @theotherwillembotha/node-red-plugincore.",
   "main": "./build/index.js",
   "exports": "./build/index.js",
@@ -45,7 +45,7 @@
     "access": "public"
   },
   "dependencies": {
-    "@theotherwillembotha/node-red-plugincore": "^0.0.54",
+    "@theotherwillembotha/node-red-plugincore": "^0.0.55",
     "temporal-polyfill": "^0.3.2"
   },
   "devDependencies": {

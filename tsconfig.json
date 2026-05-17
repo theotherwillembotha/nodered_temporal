@@ -6,6 +6,7 @@
     "target": "es2022",                                  /* Set the JavaScript language version for emitted JavaScript and include compatible library declarations. */
      "experimentalDecorators": true,                   /* Enable experimental support for legacy experimental decorators. */
      "emitDecoratorMetadata": true,                    /* Emit design-type metadata for decorated declarations in source files. */
+    "useDefineForClassFields": false,                  /* Must be false when using experimentalDecorators — es2022+ default is true, which emits native class field initializers that shadow prototype getters defined by legacy decorators. */
 
     /* Modules */
     "module": "commonjs",                                /* Specify what module code is generated. */
