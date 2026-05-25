@@ -1,0 +1,468 @@
+<script type="text/javascript" template-section="onCompose">
+    node
+        .addDefault("name",              { value: "", required: false })
+        // From
+        .addDefault("fromValue",         { value: "payload", required: false })
+        .addDefault("fromValueType",     { value: "msg", required: true })
+        .addDefault("fromFormat",        { value: "unix-ms", required: true })
+        .addDefault("fromFormatType",    { value: "preset", required: true })
+        .addDefault("fromTimezone",      { value: "UTC", required: false })
+        .addDefault("fromTimezoneType",  { value: "tz", required: false })
+        // To
+        .addDefault("toValue",           { value: "payload", required: false })
+        .addDefault("toValueType",       { value: "date", required: true })
+        .addDefault("toFormat",          { value: "unix-ms", required: true })
+        .addDefault("toFormatType",      { value: "preset", required: true })
+        .addDefault("toTimezone",        { value: "UTC", required: false })
+        .addDefault("toTimezoneType",    { value: "tz", required: false })
+        // Offset
+        .addDefault("adjustmentString",  { value: "", required: false })
+        // Output
+        .addDefault("outputMode",        { value: "total", required: true })
+        .addDefault("outputUnit",        { value: "millisecond", required: false })
+        .addDefault("outputLargestUnit", { value: "hour", required: false })
+        .addDefault("outputStyle",       { value: "long", required: false })
+        .addDefault("outputTo",          { value: "payload", required: true })
+        .addDefault("outputToType",      { value: "msg", required: true })
+        .setPaletteLabel("Temporal Duration")
+        .setColor("#7B68EE")
+        .setIcon("temporal.png")
+        .setLabelStyle("node_label_white")
+        .setLabel(function() { return this.name || "Temporal Duration"; })
+        .setInput("in")
+        .addOutputs("out")
+</script>
+
+<div template-section="onIncludeOnce">
+    <script type="text/javascript">
+        // Shared temporal helpers — guarded so they are only defined once even if
+        // both TemporalTransformNode and TemporalDurationNode are on the same page.
+        if (typeof window._temporalGetFormats === 'undefined') {
+            window._temporalFormats = null;
+            window._temporalGetFormats = function(callback) {
+                if (window._temporalFormats) { callback(window._temporalFormats); return; }
+                $.getJSON('temporal/formats').done(function(data) {
+                    window._temporalFormats = data;
+                    callback(data);
+                }).fail(function() {
+                    window._temporalFormats = [];
+                    callback([]);
+                });
+            };
+        }
+
+        if (typeof window._temporalGetTimezones === 'undefined') {
+            window._temporalTimezones = null;
+            window._temporalGetTimezones = function(callback) {
+                if (window._temporalTimezones) { callback(window._temporalTimezones); return; }
+                $.getJSON('temporal/timezones').done(function(data) {
+                    window._temporalTimezones = data;
+                    callback(data);
+                }).fail(function() {
+                    window._temporalTimezones = [];
+                    callback([]);
+                });
+            };
+        }
+
+        if (typeof window._temporalBindTimezoneAutocomplete === 'undefined') {
+            window._temporalBindTimezoneAutocomplete = function(inputId) {
+                window._temporalGetTimezones(function(timezones) {
+                    var $outer = $('#' + inputId);
+                    var $inner = $outer.siblings('.red-ui-typedInput-container')
+                                    .find('input.red-ui-typedInput-input');
+                    if (!$inner.length) { $inner = $outer; }
+                    $inner.autocomplete({
+                        search: function() {
+                            if ($outer.typedInput('type') !== 'tz') return false;
+                        },
+                        source: function(request, response) {
+                            var term = request.term.toLowerCase();
+                            response(timezones.filter(function(tz) {
+                                return tz.toLowerCase().indexOf(term) !== -1;
+                            }).slice(0, 30));
+                        },
+                        minLength: 1,
+                        select: function(event, ui) {
+                            $inner.val(ui.item.value).trigger('change');
+                            return false;
+                        }
+                    });
+                });
+            };
+        }
+
+        if (typeof window.TEMPORAL_ADJUSTMENT_UNITS === 'undefined') {
+            window.TEMPORAL_ADJUSTMENT_UNITS = [
+                { token: 'y', label: 'year',        plural: 'years'        },
+                { token: 'M', label: 'month',       plural: 'months'       },
+                { token: 'w', label: 'week',        plural: 'weeks'        },
+                { token: 'd', label: 'day',         plural: 'days'         },
+                { token: 'H', label: 'hour',        plural: 'hours'        },
+                { token: 'm', label: 'minute',      plural: 'minutes'      },
+                { token: 's', label: 'second',      plural: 'seconds'      },
+                { token: 'S', label: 'millisecond', plural: 'milliseconds' },
+            ];
+        }
+
+        if (typeof window._temporalParseAdjustment === 'undefined') {
+            window._temporalParseAdjustment = function(str) {
+                if (!str || str.trim() === '') return { parts: [], valid: true };
+                var UNITS_HELP = TEMPORAL_ADJUSTMENT_UNITS.map(function(u) {
+                    return u.token + ' (' + u.plural + ')';
+                }).join(', ');
+                var s = str.replace(/\s+/g, '');
+                if (s.length === 0) return { parts: [], valid: true };
+                var terms = s.split(/(?=[+-])/).filter(function(t) { return t.length > 0; });
+                var accumulated = {};
+                for (var i = 0; i < terms.length; i++) {
+                    var term = terms[i];
+                    var sign = (term[0] === '-') ? -1 : 1;
+                    var body = (term[0] === '+' || term[0] === '-') ? term.slice(1) : term;
+                    if (body.length === 0) return { error: "Expected a number and unit after '" + term[0] + "'" };
+                    if (body.replace(/\d+[a-zA-Z]/g, '').length > 0) return { error: "Unexpected characters in '" + term + "'" };
+                    var pairPattern = /(\d+)([a-zA-Z])/g;
+                    var match;
+                    while ((match = pairPattern.exec(body)) !== null) {
+                        var token = match[2];
+                        var unit = TEMPORAL_ADJUSTMENT_UNITS.find(function(u) { return u.token === token; });
+                        if (!unit) return { error: "Invalid unit '" + token + "'. Supported units are: " + UNITS_HELP };
+                        accumulated[token] = (accumulated[token] || 0) + sign * parseInt(match[1], 10);
+                    }
+                }
+                var parts = TEMPORAL_ADJUSTMENT_UNITS
+                    .filter(function(u) { return u.token in accumulated && accumulated[u.token] !== 0; })
+                    .map(function(u) { return { amount: accumulated[u.token], unit: u }; });
+                return { parts: parts, valid: true };
+            };
+        }
+
+        if (typeof window._temporalDescribeAdjustment === 'undefined') {
+            window._temporalDescribeAdjustment = function(str) {
+                var result = _temporalParseAdjustment(str);
+                if (result.error) return { text: result.error, valid: false };
+                if (result.parts.length === 0) return { text: 'No offset (pass-through)', valid: true };
+                var descriptions = result.parts.map(function(p) {
+                    var verb   = p.amount >= 0 ? 'Add' : 'Subtract';
+                    var absAmt = Math.abs(p.amount);
+                    var label  = absAmt === 1 ? p.unit.label : p.unit.plural;
+                    return verb + ' ' + absAmt + ' ' + label;
+                });
+                return { text: descriptions.join(', '), valid: true };
+            };
+        }
+    </script>
+</div>
+
+<script type="text/javascript" template-section="onIncludeEditPrepare">
+    var node = this;
+
+    var TIMEZONE_TYPES = [
+        { value: 'tz', label: 'timezone', icon: 'fa fa-globe', hasValue: true, validate: function(v) { return v.length > 0; } },
+        'msg', 'flow', 'global'
+    ];
+
+    var FROM_VALUE_TYPES = ['msg', 'flow', 'global',
+        { value: 'date',     label: 'timestamp (now)',   icon: 'fa fa-clock-o', hasValue: false },
+        { value: 'previous', label: 'previous message',  icon: 'fa fa-history', hasValue: false },
+    ];
+
+    var TO_VALUE_TYPES = ['msg', 'flow', 'global',
+        { value: 'date', label: 'timestamp (now)', icon: 'fa fa-clock-o', hasValue: false },
+    ];
+
+    _temporalGetFormats(function(formats) {
+        var FORMAT_TYPES = [
+            { value: 'preset', label: 'preset', icon: 'fa fa-list', options: formats },
+            { value: 'custom', label: 'custom', icon: 'fa fa-pencil', hasValue: true, validate: function(v) { return v.length > 0; } },
+            'msg'
+        ];
+
+        // From Format
+        $('#node-input-fromFormat').typedInput({
+            typeField: '#node-input-fromFormatType',
+            types: FORMAT_TYPES
+        });
+
+        // To Format
+        $('#node-input-toFormat').typedInput({
+            typeField: '#node-input-toFormatType',
+            types: FORMAT_TYPES
+        });
+
+        // From Value — init after fromFormat exists so the change handler can disable it
+        function applyFromValueVisibility(type) {
+            var $fmt = $('#node-input-fromFormat');
+            if (type === 'previous') {
+                $('#row-from-format').hide();
+                $('#row-from-timezone').hide();
+                $('#row-from-previous-note').show();
+                node._def.defaults.fromValue.required = false;
+            } else {
+                $('#row-from-format').show();
+                $('#row-from-timezone').show();
+                $('#row-from-previous-note').hide();
+                if (type === 'date') {
+                    $fmt.typedInput('type', 'preset');
+                    $fmt.typedInput('value', 'unix-ms');
+                    $fmt.typedInput('disable');
+                    node._def.defaults.fromValue.required = false;
+                } else {
+                    $fmt.typedInput('enable');
+                    node._def.defaults.fromValue.required = true;
+                }
+            }
+        }
+
+        $('#node-input-fromValue').typedInput({
+            typeField: '#node-input-fromValueType',
+            types: FROM_VALUE_TYPES
+        }).on('change', function(event, type) {
+            applyFromValueVisibility(type);
+        });
+
+        // Apply visibility for the already-saved type on dialog open
+        applyFromValueVisibility($('#node-input-fromValue').typedInput('type'));
+
+        // To Value — init after toFormat exists so the change handler can disable it
+        $('#node-input-toValue').typedInput({
+            typeField: '#node-input-toValueType',
+            types: TO_VALUE_TYPES
+        }).on('change', function(event, type) {
+            var $fmt = $('#node-input-toFormat');
+            if (type === 'date') {
+                $fmt.typedInput('type', 'preset');
+                $fmt.typedInput('value', 'unix-ms');
+                $fmt.typedInput('disable');
+                node._def.defaults.toValue.required = false;
+            } else {
+                $fmt.typedInput('enable');
+                node._def.defaults.toValue.required = true;
+            }
+        });
+    });
+
+    // From Timezone
+    $('#node-input-fromTimezone').typedInput({
+        typeField: '#node-input-fromTimezoneType',
+        types: TIMEZONE_TYPES
+    });
+    _temporalBindTimezoneAutocomplete('node-input-fromTimezone');
+
+    // To Timezone
+    $('#node-input-toTimezone').typedInput({
+        typeField: '#node-input-toTimezoneType',
+        types: TIMEZONE_TYPES
+    });
+    _temporalBindTimezoneAutocomplete('node-input-toTimezone');
+
+    // Output To
+    $('#node-input-outputTo').typedInput({
+        typeField: '#node-input-outputToType',
+        types: ['msg', 'flow', 'global']
+    });
+
+    // Offset preview
+    function updateOffsetPreview() {
+        var str = $('#node-input-adjustmentString').val();
+        var result = _temporalDescribeAdjustment(str);
+        var $preview = $('#temporal-duration-offset-preview');
+        $preview.text(result.text);
+        $preview.toggleClass('invalid', !result.valid);
+    }
+    $('#node-input-adjustmentString').on('input', updateOffsetPreview);
+    updateOffsetPreview();
+
+    // Output Mode — show/hide conditional sections
+    function updateOutputModeVisibility() {
+        var mode = $('#node-input-outputMode').val();
+        $('#section-duration-total').toggle(mode === 'total');
+        $('#section-duration-components').toggle(mode === 'components');
+        $('#section-duration-human').toggle(mode === 'human');
+    }
+    $('#node-input-outputMode').on('change', updateOutputModeVisibility);
+    updateOutputModeVisibility();
+</script>
+
+<script type="text/javascript" template-section="onIncludeEditSave">
+    // typedInput fields auto-save via node-input-* naming conventions
+</script>
+
+<script type="text/javascript" template-section="onIncludeEditCancel">
+    // nothing to dispose
+</script>
+
+<script type="text/html" template-section="onIncludeEditForm">
+    <input type="hidden" id="node-input-fromValueType" />
+    <input type="hidden" id="node-input-fromFormatType" />
+    <input type="hidden" id="node-input-fromTimezoneType" />
+    <input type="hidden" id="node-input-toValueType" />
+    <input type="hidden" id="node-input-toFormatType" />
+    <input type="hidden" id="node-input-toTimezoneType" />
+    <input type="hidden" id="node-input-outputToType" />
+
+    <!-- NAME -->
+    <div class="form-row">
+        <label class="towb_editorlabel" for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+        <input type="text" id="node-input-name" placeholder="Temporal Duration" />
+    </div>
+
+    <!-- FROM TIME -->
+    <div class="temporal-section-header">From Time</div>
+
+    <div class="form-row">
+        <label class="towb_editorlabel" for="node-input-fromValue"><i class="fa fa-sign-in"></i> From</label>
+        <input type="text" id="node-input-fromValue" />
+    </div>
+
+    <div id="row-from-format" class="form-row">
+        <label class="towb_editorlabel" for="node-input-fromFormat"><i class="fa fa-list"></i> Format</label>
+        <input type="text" id="node-input-fromFormat" />
+    </div>
+
+    <div id="row-from-timezone" class="form-row">
+        <label class="towb_editorlabel" for="node-input-fromTimezone"><i class="fa fa-globe"></i> Timezone</label>
+        <input type="text" id="node-input-fromTimezone" />
+    </div>
+
+    <div id="row-from-previous-note" class="form-row" style="display:none;">
+        <p style="margin-left: 108px; font-size: 11px; color: #555;">
+            <i class="fa fa-info-circle"></i>
+            The first message sets the baseline and is not forwarded. Each subsequent message outputs the duration since the previous one.
+        </p>
+    </div>
+
+    <!-- TO TIME -->
+    <div class="temporal-section-header">To Time</div>
+
+    <div class="form-row">
+        <label class="towb_editorlabel" for="node-input-toValue"><i class="fa fa-sign-in"></i> To</label>
+        <input type="text" id="node-input-toValue" />
+    </div>
+
+    <div class="form-row">
+        <label class="towb_editorlabel" for="node-input-toFormat"><i class="fa fa-list"></i> Format</label>
+        <input type="text" id="node-input-toFormat" />
+    </div>
+
+    <div class="form-row">
+        <label class="towb_editorlabel" for="node-input-toTimezone"><i class="fa fa-globe"></i> Timezone</label>
+        <input type="text" id="node-input-toTimezone" />
+    </div>
+
+    <!-- OFFSET -->
+    <div class="temporal-section-header">Offset</div>
+
+    <div class="form-row">
+        <label class="towb_editorlabel" for="node-input-adjustmentString"><i class="fa fa-clock-o"></i> Offset by</label>
+        <input type="text" id="node-input-adjustmentString" placeholder="e.g. +27m +30s" style="width: calc(70% - 10px);" />
+    </div>
+    <div id="temporal-duration-offset-preview" class="temporal-adjustment-preview"></div>
+
+    <!-- OUTPUT -->
+    <div class="temporal-section-header">Output</div>
+
+    <div class="form-row">
+        <label class="towb_editorlabel" for="node-input-outputTo"><i class="fa fa-sign-out"></i> To</label>
+        <input type="text" id="node-input-outputTo" />
+    </div>
+
+    <div class="form-row">
+        <label class="towb_editorlabel" for="node-input-outputMode"><i class="fa fa-th-list"></i> Mode</label>
+        <select id="node-input-outputMode" class="towb_editorfield">
+            <option value="total">Total in unit</option>
+            <option value="components">Duration components</option>
+            <option value="iso">ISO 8601 string</option>
+            <option value="human">Human readable</option>
+        </select>
+    </div>
+
+    <!-- Total options -->
+    <div id="section-duration-total">
+        <div class="form-row">
+            <label class="towb_editorlabel" for="node-input-outputUnit"><i class="fa fa-clock-o"></i> Unit</label>
+            <select id="node-input-outputUnit" class="towb_editorfield">
+                <option value="millisecond">Milliseconds</option>
+                <option value="second">Seconds</option>
+                <option value="minute">Minutes</option>
+                <option value="hour">Hours</option>
+                <option value="day">Days</option>
+            </select>
+        </div>
+    </div>
+
+    <!-- Components options -->
+    <div id="section-duration-components">
+        <div class="form-row">
+            <label class="towb_editorlabel" for="node-input-outputLargestUnit"><i class="fa fa-expand"></i> Largest unit</label>
+            <select id="node-input-outputLargestUnit" class="towb_editorfield">
+                <option value="year">Years</option>
+                <option value="month">Months</option>
+                <option value="week">Weeks</option>
+                <option value="day">Days</option>
+                <option value="hour">Hours</option>
+                <option value="minute">Minutes</option>
+                <option value="second">Seconds</option>
+            </select>
+        </div>
+    </div>
+
+    <!-- Human readable options -->
+    <div id="section-duration-human">
+        <div class="form-row">
+            <label class="towb_editorlabel" for="node-input-outputStyle"><i class="fa fa-font"></i> Style</label>
+            <select id="node-input-outputStyle" class="towb_editorfield">
+                <option value="long">Long (2 hours, 30 minutes)</option>
+                <option value="short">Short (2 hr, 30 min)</option>
+                <option value="narrow">Narrow (2h 30m)</option>
+            </select>
+        </div>
+    </div>
+</script>
+
+<script type="text/markdown" template-section="onIncludeDocumentation">
+Computes the duration between two date/time values. Supports multiple output formats including a total in a single unit, a components object, ISO 8601 duration string, or a human-readable description.
+
+### From Time / To Time
+
+Each time endpoint uses the same fields:
+
+: *From / To* : Where to read the date/time value. Choose `msg`, `flow`, or `global` to read from a property or context variable, **timestamp (now)** to use the current time, or **previous message** (From only) to measure the interval between consecutive messages.
+: *Format*    : How the value is encoded. Choose a named preset or **custom** to enter a format string. Hidden or disabled when not applicable.
+: *Timezone*  : The IANA timezone (e.g. `Europe/Amsterdam`) or UTC offset (e.g. `+02:00`) the value is expressed in. Required for formats that carry no timezone information.
+
+The duration is always computed as **To − From** (positive when To is later than From).
+
+**Previous message mode**
+
+When **From** is set to **previous message**, the first message arriving at the node stores the To time as a baseline and is not forwarded. Every subsequent message computes the duration from the stored baseline, updates the baseline, and forwards the message with the result. The stored baseline resets on redeploy.
+
+---
+
+### Offset
+
+: *Offset by* : An optional expression that shifts the computed duration before output. Uses the same syntax as the Temporal Transform **Adjust by** field — e.g. `+27m +30s`. A live preview below the field describes the offset in plain English. Leave empty for no adjustment.
+
+---
+
+### Output modes
+
+: *Total in unit*        : The duration expressed as a single number in the selected unit (e.g. total milliseconds, total hours). Fractional values are returned where applicable.
+: *Duration components*  : A plain object containing each component down from the selected **Largest unit** (e.g. `\{ hours: 2, minutes: 30, seconds: 5, milliseconds: 0 \}`). Fields for units larger than the largest unit are always zero.
+: *ISO 8601 string*      : The duration as an ISO 8601 duration string (e.g. `P1Y2M3DT4H5M6S`).
+: *Human readable*       : A locale-formatted string using `Intl.DurationFormat` (e.g. `"2 hours, 30 minutes"`). Uses English locale with the selected style.
+
+**Human readable styles**
+
+| Style | Example |
+|-------|---------|
+| Long | 2 hours, 30 minutes, 5 seconds |
+| Short | 2 hr., 30 min., 5 sec. |
+| Narrow | 2h 30m 5s |
+
+---
+
+### Error handling
+
+If either time value cannot be parsed, the message is **dropped** and a **warning** is logged on the node.
+</script>

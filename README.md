@@ -1,6 +1,6 @@
 # node-red-temporal
 
-A Node-RED plugin for parsing, converting, adjusting, and formatting date/time values. Built on the [TC39 Temporal API](https://tc39.es/proposal-temporal/) via [`temporal-polyfill`](https://www.npmjs.com/package/temporal-polyfill).
+A Node-RED plugin for parsing, converting, adjusting, and computing durations between date/time values. Built on the [TC39 Temporal API](https://tc39.es/proposal-temporal/) via [`temporal-polyfill`](https://www.npmjs.com/package/temporal-polyfill).
 
 ---
 
@@ -31,6 +31,19 @@ Transforms a date/time value from one representation to another in a single node
 
 ---
 
+### Temporal Duration
+
+Computes the duration between two date/time values. Supports:
+
+- Reading each endpoint from `msg`, `flow`, `global` context, the current timestamp, or the **previous message** (interval measurement mode)
+- An optional offset to shift the computed duration before output
+- Four output modes: total in a single unit, broken-down components object, ISO 8601 duration string, or human-readable text
+- Writing the result to `msg`, `flow`, or `global` context
+
+![Temporal Duration editor](documentation/TemporalDurationNode.png)
+
+---
+
 ## Installation
 
 ```bash
@@ -43,7 +56,7 @@ Or search for `node-red-temporal` in the Node-RED palette manager.
 
 ---
 
-## Temporal Transform - field reference
+## Temporal Transform — field reference
 
 ### Input section
 
@@ -53,7 +66,7 @@ Or search for `node-red-temporal` in the Node-RED palette manager.
 | **Format** | How the input value is encoded. Choose a named preset or enter a custom format string (see [Format reference](#format-reference) below). Can also be read dynamically from a `msg`, `flow`, or `global` property. |
 | **Timezone** | The timezone the input value is expressed in. Required for formats that do not carry timezone information (`date`, `datetime`, `unix-s`, `unix-ms`, `rfc2822`, and custom formats). Accepts IANA names (e.g. `Europe/Amsterdam`) or UTC offset strings (e.g. `+02:00`). Can also be read from a `msg`, `flow`, or `global` property. |
 
-> When **From** is set to **timestamp (now)** the Format field is automatically locked to **Unix timestamp (milliseconds)** and the Input Timezone field has no effect.
+> When **From** is set to **timestamp (now)** the Format field is automatically locked to **milliseconds since epoch** and the Input Timezone field has no effect.
 
 ---
 
@@ -77,9 +90,70 @@ The editor shows a live human-readable preview of the adjustment as you type (e.
 
 ---
 
+## Temporal Duration — field reference
+
+### From Time / To Time sections
+
+Each endpoint has the same three fields:
+
+| Field | Description |
+|-------|-------------|
+| **From / To** | Where to read the date/time value. Supports `msg`, `flow`, and `global` properties, **timestamp (now)** to use the current time, or **previous message** (From only — see below). |
+| **Format** | How the value is encoded. Choose a named preset or a custom format string. Disabled when **timestamp (now)** is selected. |
+| **Timezone** | The IANA timezone or UTC offset the value is expressed in. Required for formats that carry no timezone information. |
+
+The duration is always computed as **To − From** (positive when To is later than From).
+
+#### Interval measurement — "previous message" mode
+
+When **From** is set to **previous message**:
+
+- The Format and Timezone fields for the From section are hidden — not needed, since the stored value is already a parsed `ZonedDateTime`.
+- The **first message** arriving at the node stores the To time as the baseline and is **not forwarded**.
+- Every **subsequent message** computes the duration from the stored baseline to the current To time, writes the output, then stores the current To time for the next message.
+- The stored baseline is **reset when the flow is redeployed**.
+
+This mode is useful for measuring the interval between recurring messages (e.g. sensor readings, heartbeats, pipeline throughput).
+
+---
+
+### Offset section
+
+| Field | Description |
+|-------|-------------|
+| **Offset by** | An optional expression that shifts the computed duration before output. Uses the same syntax as the Temporal Transform adjustment string — see [Adjustment string syntax](#adjustment-string-syntax) below. |
+
+---
+
+### Output section
+
+| Field | Description |
+|-------|-------------|
+| **To** | Where to write the result. Supports `msg`, `flow`, and `global` properties. |
+| **Mode** | How to express the duration. See output modes below. |
+
+#### Output modes
+
+| Mode | Output type | Description |
+|------|-------------|-------------|
+| **Total in unit** | `number` | The entire duration expressed as a single numeric value in the selected unit (milliseconds, seconds, minutes, hours, or days). Fractional values are returned where applicable. |
+| **Duration components** | `object` | A plain object with keys `years`, `months`, `weeks`, `days`, `hours`, `minutes`, `seconds`, `milliseconds`. The values are broken down from the selected **Largest unit** downward — fields for units larger than the largest unit are always zero. |
+| **ISO 8601 string** | `string` | The duration as an ISO 8601 duration string, e.g. `P1Y2M3DT4H5M6S`. |
+| **Human readable** | `string` | A locale-formatted string using `Intl.DurationFormat` with English locale and the selected style. |
+
+**Human readable styles**
+
+| Style | Example |
+|-------|---------|
+| Long | `2 hours, 30 minutes, 5 seconds` |
+| Short | `2 hr., 30 min., 5 sec.` |
+| Narrow | `2h 30m 5s` |
+
+---
+
 ## Format reference
 
-The following named presets are available for both input and output:
+The following named presets are available for both input and output in the Temporal Transform node, and for both endpoint fields in the Temporal Duration node:
 
 | Preset | Description | Example |
 |--------|-------------|---------|
@@ -87,8 +161,9 @@ The following named presets are available for both input and output:
 | `iso-utc` | ISO 8601 UTC (Zulu) | `2024-05-16T12:30:00.000Z` |
 | `date` | Date only | `2024-05-16` |
 | `datetime` | Date and local time (no timezone) | `2024-05-16 14:30:00` |
-| `unix-s` | Unix timestamp in seconds | `1715860200` |
-| `unix-ms` | Unix timestamp in milliseconds | `1715860200000` |
+| `unix-s` | Seconds since epoch | `1715860200` |
+| `unix-ms` | Milliseconds since epoch | `1715860200000` |
+| `js-date` | JavaScript Date Object | *(Node.js `Date` instance)* |
 | `rfc2822` | RFC 2822 email date format | `Thu, 16 May 2024 14:30:00 +0200` |
 
 ### Custom format strings
@@ -128,20 +203,20 @@ Any character in the format string that does not match a token is treated as a l
 | `hh:mm:ss A` | `02:30:05 PM` |
 | `YYYY-MM-DDTHH:mm:ss` | `2024-05-16T14:30:05` |
 
-> **Note:** Named month abbreviations (e.g. `Jan`, `Feb`) are not supported as tokens - the format system works with numeric values only.
+> **Note:** Named month abbreviations (e.g. `Jan`, `Feb`) are not supported as tokens — the format system works with numeric values only.
 
 ---
 
 ## Adjustment string syntax
 
-The **Adjust by** field accepts an expression that shifts the parsed time value before it is written to the output. Multiple adjustments can be combined freely in a single string.
+The **Adjust by** field (Temporal Transform) and **Offset by** field (Temporal Duration) accept the same expression syntax to shift a time or duration value.
 
 ### Units
 
 | Token | Unit | Notes |
 |-------|------|-------|
-| `y` | Years | Calendar unit - result is clamped to the last valid day of the month |
-| `M` | Months | Calendar unit - result is clamped to the last valid day of the month |
+| `y` | Years | Calendar unit — result is clamped to the last valid day of the month |
+| `M` | Months | Calendar unit — result is clamped to the last valid day of the month |
 | `w` | Weeks | Equivalent to 7 days |
 | `d` | Days | |
 | `H` | Hours | |
@@ -157,8 +232,8 @@ The **Adjust by** field accepts an expression that shifts the parsed time value 
 - A sign applies to all units that follow it until the next sign: `-1H30m` subtracts both 1 hour **and** 30 minutes.
 - Multiple groups can be combined freely: `+1y -2M +3d`
 - Whitespace is ignored: `+1y -2M` and `+1y-2M` are equivalent.
-- The same unit may appear multiple times - values are accumulated: `+1H +1H` is the same as `+2H`.
-- An empty string (or whitespace only) means no adjustment - the value passes through unchanged.
+- The same unit may appear multiple times — values are accumulated: `+1H +1H` is the same as `+2H`.
+- An empty string (or whitespace only) means no adjustment — the value passes through unchanged.
 
 ### Examples
 
@@ -188,8 +263,8 @@ This is the correct TC39 Temporal API behaviour and is intentional.
 
 Timezone fields accept:
 
-- **IANA timezone names** - e.g. `Europe/Amsterdam`, `America/New_York`, `Asia/Tokyo`, `UTC`
-- **UTC offset strings** - e.g. `+02:00`, `-05:30`, `+00:00`
+- **IANA timezone names** — e.g. `Europe/Amsterdam`, `America/New_York`, `Asia/Tokyo`, `UTC`
+- **UTC offset strings** — e.g. `+02:00`, `-05:30`, `+00:00`
 
 An autocomplete dropdown is available in the editor for IANA names. The full list is sourced from the server's `Intl.supportedValuesOf('timeZone')`.
 
@@ -197,12 +272,12 @@ An autocomplete dropdown is available in the editor for IANA names. The full lis
 
 ## Error handling
 
-If the input value cannot be parsed using the specified format, or if the adjustment string contains an invalid expression:
+If a date/time value cannot be parsed using the specified format, or if an adjustment/offset string contains an invalid expression:
 
 - The message is **dropped** (not forwarded to the output).
 - A **warning** is logged on the node, visible in the Node-RED debug panel.
 
-This ensures that downstream nodes only receive well-formed date/time values.
+This ensures that downstream nodes only receive well-formed values.
 
 ---
 
@@ -213,10 +288,10 @@ This ensures that downstream nodes only receive well-formed date/time values.
 | Field | Value |
 |-------|-------|
 | From | `msg.payload` |
-| Input Format | Unix timestamp (milliseconds) |
-| Input Timezone | UTC |
+| Format | Milliseconds since epoch |
+| Timezone | UTC |
 | Adjust by | *(empty)* |
-| Output To | `msg.payload` |
+| To | `msg.payload` |
 | Output Format | `YYYY-MM-DD HH:mm:ss` (custom) |
 | Output Timezone | `Europe/Amsterdam` |
 
@@ -229,7 +304,7 @@ Input `msg.payload`: `1715860200000` → Output `msg.payload`: `2024-05-16 14:30
 | Field | Value |
 |-------|-------|
 | From | `msg.payload` |
-| Input Format | ISO 8601 with offset |
+| Format | ISO 8601 with offset |
 | Adjust by | `+5d` |
 | Output Format | ISO 8601 UTC |
 | Output Timezone | UTC |
@@ -244,7 +319,7 @@ Input: `2024-05-16T14:30:00+02:00` → Output: `2024-05-21T12:30:00.000Z`
 |-------|-------|
 | From | timestamp (now) |
 | Adjust by | *(empty)* |
-| Output To | `msg.timestamp` |
+| To | `msg.timestamp` |
 | Output Format | `YYYY-MM-DD HH:mm:ss` (custom) |
 | Output Timezone | `Africa/Johannesburg` |
 
@@ -252,9 +327,30 @@ Writes the current local time in Johannesburg to `msg.timestamp`.
 
 ---
 
-### Read format from the message dynamically
+### Compute the total seconds between two timestamps
 
-Set the **Input Format** field type to `msg` and enter the property name (e.g. `format`). The node will read the format string at runtime from `msg.format`, allowing the same node to handle multiple input formats.
+| Field | Value |
+|-------|-------|
+| From | `msg.start` — milliseconds since epoch |
+| Timezone | UTC |
+| To | `msg.end` — milliseconds since epoch |
+| Timezone | UTC |
+| Mode | Total in unit — Seconds |
+| To | `msg.payload` |
+
+---
+
+### Measure the interval between messages
+
+| Field | Value |
+|-------|-------|
+| From | previous message |
+| To | `msg.payload` — milliseconds since epoch |
+| Timezone | UTC |
+| Mode | Total in unit — Milliseconds |
+| To | `msg.interval` |
+
+The first message is stored as the baseline and dropped. Every subsequent message produces the elapsed milliseconds since the previous one in `msg.interval`.
 
 ---
 

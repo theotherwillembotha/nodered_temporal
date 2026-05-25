@@ -1,9 +1,9 @@
 <script type="text/javascript" template-section="onCompose">
     node
         .addDefault("name",              { value: "", required: false })
-        .addDefault("inputFrom",         { value: "payload", required: true })
-        .addDefault("inputFromType",     { value: "msg", required: true })
-        .addDefault("inputFormat",       { value: "iso-utc", required: true })
+        .addDefault("inputFrom",         { value: "payload", required: false })
+        .addDefault("inputFromType",     { value: "date", required: true })
+        .addDefault("inputFormat",       { value: "unix-ms", required: true })
         .addDefault("inputFormatType",   { value: "preset", required: true })
         .addDefault("inputTimezone",     { value: "UTC", required: false })
         .addDefault("inputTimezoneType", { value: "tz", required: false })
@@ -354,7 +354,7 @@ Transforms a date/time value from one representation to another. Supports parsin
 : *Format*   : How the input value is encoded. Choose a named preset or select **custom** to enter a format string. Can also be read dynamically from `msg`, `flow`, or `global`.
 : *Timezone* : The timezone the input value is expressed in. Required for formats that carry no timezone information (`date`, `datetime`, `unix-s`, `unix-ms`, custom). Accepts IANA names (`Europe/Amsterdam`) or UTC offset strings (`+02:00`). Can also be read from a property.
 
-> When **From** is **timestamp (now)**, the Format field is locked to *Unix timestamp (milliseconds)* and Timezone has no effect.
+> When **From** is **timestamp (now)**, the Format field is locked to *milliseconds since epoch* and Timezone has no effect.
 
 ---
 
@@ -399,8 +399,9 @@ Calendar units (`y`, `M`) are applied relative to the calendar date and the resu
 | `iso-utc` | ISO 8601 UTC | `2024-05-16T12:30:00.000Z` |
 | `date` | Date only | `2024-05-16` |
 | `datetime` | Date and local time | `2024-05-16 14:30:00` |
-| `unix-s` | Unix timestamp (seconds) | `1715860200` |
-| `unix-ms` | Unix timestamp (milliseconds) | `1715860200000` |
+| `unix-s` | Seconds since epoch | `1715860200` |
+| `unix-ms` | Milliseconds since epoch | `1715860200000` |
+| `js-date` | JavaScript Date Object | *(Node.js `Date` instance)* |
 | `rfc2822` | RFC 2822 | `Thu, 16 May 2024 14:30:00 +0200` |
 
 ---

@@ -8,7 +8,7 @@ const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', '
 export type NamedFormat = {
     label:  string;
     parse:  (str: string, timezone: string) => Temporal.ZonedDateTime;
-    format: (zdt: Temporal.ZonedDateTime)   => string | number;
+    format: (zdt: Temporal.ZonedDateTime)   => string | number | Date;
 };
 
 export const NAMED_FORMATS: Record<string, NamedFormat> = {
@@ -39,14 +39,23 @@ export const NAMED_FORMATS: Record<string, NamedFormat> = {
         format: (zdt) => `${zdt.toPlainDate()} ${zdt.toPlainTime().toString({ smallestUnit: 'second' })}`,
     },
     'unix-s': {
-        label:  'Unix timestamp (seconds)',
+        label:  'seconds since epoch',
         parse:  (str, timezone) => Temporal.Instant.fromEpochMilliseconds(Number(str) * 1000).toZonedDateTimeISO(timezone),
         format: (zdt) => Math.floor(zdt.epochMilliseconds / 1000),
     },
     'unix-ms': {
-        label:  'Unix timestamp (milliseconds)',
+        label:  'milliseconds since epoch',
         parse:  (str, timezone) => Temporal.Instant.fromEpochMilliseconds(Number(str)).toZonedDateTimeISO(timezone),
         format: (zdt) => zdt.epochMilliseconds,
+    },
+    'js-date': {
+        label:  'JavaScript Date Object',
+        parse:  (str, timezone) => {
+            const ms = new Date(str).getTime();
+            if (isNaN(ms)) throw new Error(`Could not parse JavaScript Date: '${str}'`);
+            return Temporal.Instant.fromEpochMilliseconds(ms).toZonedDateTimeISO(timezone);
+        },
+        format: (zdt) => new Date(zdt.epochMilliseconds),
     },
     'rfc2822': {
         label:  'RFC 2822 (Thu, 16 May 2024 14:30:00 +0200)',

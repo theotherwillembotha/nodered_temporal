@@ -1,6 +1,6 @@
 {
   "name": "@theotherwillembotha/node-red-temporal",
-  "version": "0.0.55",
+  "version": "0.1.0",
   "description": "Time value manipulation nodes for Node-RED. Built on @theotherwillembotha/node-red-plugincore.",
   "main": "./build/index.js",
   "exports": "./build/index.js",
@@ -16,10 +16,9 @@
   ],
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "build": "npm run clean && tsc && npm run copy-html && npm run generate-nodes && npm run copy-files",
+    "build": "npm run clean && tsc && npm run generate-nodes && npm run copy-files",
     "clean": "rm -rf ./build",
     "generate-nodes": "node build/GenerateNodes.js",
-    "copy-html": "cd src && find -type f -name '*Template.html' -exec cp --parents '{}' ../build/ ';' && find -type f -name '*Node.html' -exec cp --parents '{}' ../build/ ';' && cd ..",
     "copy-files": "cp -r ./icons ./build/"
   },
   "files": [
@@ -45,7 +44,8 @@
     "access": "public"
   },
   "dependencies": {
-    "@theotherwillembotha/node-red-plugincore": "^0.0.55",
+    "@formatjs/intl-durationformat": "^0.10.12",
+    "@theotherwillembotha/node-red-plugincore": "^0.1.0",
     "temporal-polyfill": "^0.3.2"
   },
   "devDependencies": {
