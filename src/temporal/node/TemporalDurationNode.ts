@@ -58,7 +58,7 @@ export class TemporalDurationNode extends BaseNode<TemporalDurationNodeConfig> {
         try {
             const isIntervalMode = this.config().fromValueType === 'previous';
 
-            // Always resolve "To" — this is the "current" time in all modes
+            // Always resolve "To" - this is the "current" time in all modes
             const toZdt = this.resolveZdt(
                 message,
                 this.config().toValue,    this.config().toValueType,
@@ -72,7 +72,7 @@ export class TemporalDurationNode extends BaseNode<TemporalDurationNodeConfig> {
                 const prev = this._previousZdt;
                 this._previousZdt = toZdt;
                 if (prev === null) {
-                    // First message — store the time and drop the message
+                    // First message - store the time and drop the message
                     return;
                 }
                 fromZdt = prev;

@@ -35,7 +35,7 @@
 
 <div template-section="onIncludeOnce">
     <script type="text/javascript">
-        // Shared temporal helpers — guarded so they are only defined once even if
+        // Shared temporal helpers - guarded so they are only defined once even if
         // both TemporalTransformNode and TemporalDurationNode are on the same page.
         if (typeof window._temporalGetFormats === 'undefined') {
             window._temporalFormats = null;
@@ -190,7 +190,7 @@
             types: FORMAT_TYPES
         });
 
-        // From Value — init after fromFormat exists so the change handler can disable it
+        // From Value - init after fromFormat exists so the change handler can disable it
         function applyFromValueVisibility(type) {
             var $fmt = $('#node-input-fromFormat');
             if (type === 'previous') {
@@ -224,7 +224,7 @@
         // Apply visibility for the already-saved type on dialog open
         applyFromValueVisibility($('#node-input-fromValue').typedInput('type'));
 
-        // To Value — init after toFormat exists so the change handler can disable it
+        // To Value - init after toFormat exists so the change handler can disable it
         $('#node-input-toValue').typedInput({
             typeField: '#node-input-toValueType',
             types: TO_VALUE_TYPES
@@ -273,7 +273,7 @@
     $('#node-input-adjustmentString').on('input', updateOffsetPreview);
     updateOffsetPreview();
 
-    // Output Mode — show/hide conditional sections
+    // Output Mode - show/hide conditional sections
     function updateOutputModeVisibility() {
         var mode = $('#node-input-outputMode').val();
         $('#section-duration-total').toggle(mode === 'total');
@@ -441,7 +441,7 @@ When **From** is set to **previous message**, the first message arriving at the 
 
 ### Offset
 
-: *Offset by* : An optional expression that shifts the computed duration before output. Uses the same syntax as the Temporal Transform **Adjust by** field — e.g. `+27m +30s`. A live preview below the field describes the offset in plain English. Leave empty for no adjustment.
+: *Offset by* : An optional expression that shifts the computed duration before output. Uses the same syntax as the Temporal Transform **Adjust by** field - e.g. `+27m +30s`. A live preview below the field describes the offset in plain English. Leave empty for no adjustment.
 
 ---
 

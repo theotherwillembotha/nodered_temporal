@@ -17,6 +17,6 @@ new NodeGenerator("./src/")
     .registerNode(TemporalDurationNode)
 
     // done.
-    .generate("./build/Nodes", "./build/Plugins");
+    .generate("./build/Nodes", "./build/Plugins", "@theotherwillembotha/node-red-temporal");
 
 process.exit(0);

@@ -1,5 +1,5 @@
 import { Temporal } from 'temporal-polyfill';
-import { BaseService, FlowDeployment, ServiceDescriptor } from "@theotherwillembotha/node-red-plugincore";
+import { BaseService, FlowDeployment, ServiceDescription } from "@theotherwillembotha/node-red-plugincore";
 import { NodeAPI, NodeAPISettingsWithData } from "node-red";
 
 const DAYS   = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -81,6 +81,10 @@ export const NAMED_FORMATS: Record<string, NamedFormat> = {
     },
 };
 
+@ServiceDescription({
+    id: "@theotherwillembotha/temporalservice",
+    sourceFile: "./temporal/service/TemporalService",
+})
 export class TemporalService extends BaseService {
 
     constructor() {
@@ -105,14 +109,4 @@ export class TemporalService extends BaseService {
     public onDeploy(_flowDeployment: FlowDeployment): void | Promise<void> {
     }
 
-    static override getServiceDescriptor(): ServiceDescriptor {
-        return new ServiceDescriptor(
-            "@theotherwillembotha/temporalservice",
-            "TemporalService",
-            "services-plugin",
-            "@theotherwillembotha/node-red-temporal",
-            TemporalService,
-            []
-        );
-    }
 }
