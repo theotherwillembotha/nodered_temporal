@@ -47,7 +47,7 @@
   },
   "dependencies": {
     "@formatjs/intl-durationformat": "^0.10.12",
-    "@theotherwillembotha/node-red-plugincore": "^0.4.1",
+    "@theotherwillembotha/node-red-plugincore": "^0.4.2",
     "temporal-polyfill": "^0.3.2"
   },
   "devDependencies": {
