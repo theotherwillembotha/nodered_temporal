@@ -1,9 +1,10 @@
 {
   "name": "@theotherwillembotha/node-red-temporal",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Time value manipulation nodes for Node-RED. Built on @theotherwillembotha/node-red-plugincore.",
   "main": "./build/index.js",
   "exports": "./build/index.js",
+  "types": "./build/index.d.ts",
   "author": "Willem Botha (@theotherwillembotha)",
   "license": "ISC",
   "keywords": [
@@ -46,7 +47,7 @@
   },
   "dependencies": {
     "@formatjs/intl-durationformat": "^0.10.12",
-    "@theotherwillembotha/node-red-plugincore": "^0.3.0",
+    "@theotherwillembotha/node-red-plugincore": "^0.4.1",
     "temporal-polyfill": "^0.3.2"
   },
   "devDependencies": {

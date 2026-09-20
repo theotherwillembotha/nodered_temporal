@@ -92,11 +92,13 @@ export class TemporalService extends BaseService {
     }
 
     public init(red: NodeAPI<NodeAPISettingsWithData>): void | Promise<void> {
-        red.httpAdmin.get("/temporal/timezones", (_request, response) => {
+        const read = red.auth.needsPermission("nodes.read");
+
+        red.httpAdmin.get("/temporal/timezones", read, (_request, response) => {
             response.json(Intl.supportedValuesOf('timeZone'));
         });
 
-        red.httpAdmin.get("/temporal/formats", (_request, response) => {
+        red.httpAdmin.get("/temporal/formats", read, (_request, response) => {
             response.json(Object.entries(NAMED_FORMATS).map(([value, f]) => ({ value, label: f.label })));
         });
         return Promise.resolve();
