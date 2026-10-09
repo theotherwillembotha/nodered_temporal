@@ -1,6 +1,6 @@
 {
   "name": "@theotherwillembotha/node-red-temporal",
-  "version": "0.4.0",
+  "version": "0.4.6",
   "description": "Time value manipulation nodes for Node-RED. Built on @theotherwillembotha/node-red-plugincore.",
   "main": "./build/index.js",
   "exports": "./build/index.js",
@@ -47,7 +47,7 @@
   },
   "dependencies": {
     "@formatjs/intl-durationformat": "^0.10.12",
-    "@theotherwillembotha/node-red-plugincore": "^0.4.2",
+    "@theotherwillembotha/node-red-plugincore": "^0.4.6",
     "temporal-polyfill": "^0.3.2"
   },
   "devDependencies": {
